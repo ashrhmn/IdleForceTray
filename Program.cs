@@ -125,9 +125,19 @@ static class Program
     [STAThread]
     static void Main()
     {
-        // To customize application configuration such as set high DPI settings or default font,
-        // see https://aka.ms/applicationconfiguration.
-        ApplicationConfiguration.Initialize();
-        Application.Run(new Form1());
+        // Single instance check using named mutex
+        using (var mutex = new Mutex(true, @"Global\IdleForceTray", out bool createdNew))
+        {
+            if (!createdNew)
+            {
+                // Another instance is already running, exit silently
+                return;
+            }
+
+            // To customize application configuration such as set high DPI settings or default font,
+            // see https://aka.ms/applicationconfiguration.
+            ApplicationConfiguration.Initialize();
+            Application.Run(new Form1());
+        }
     }    
 }

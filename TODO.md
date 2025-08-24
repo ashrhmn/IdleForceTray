@@ -6,7 +6,7 @@
 
 ## Core Implementation
 - [x] Add PInvoke for GetLastInputInfo, SetSuspendState, XInputGetState with three DLL names
-- [ ] Implement named mutex for single instance
+- [x] Implement named mutex for single instance
 - [ ] Implement tray NotifyIcon with context menu and event handlers
 - [ ] Implement settings persistence with JSON
 - [ ] Implement startup toggle using ShellLink with Task Scheduler fallback
