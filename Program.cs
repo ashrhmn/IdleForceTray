@@ -595,6 +595,7 @@ static class Program
                     Environment.Exit(0);
                     break;
                     
+                    
                 default:
                     if (arg.StartsWith("-") || arg.StartsWith("/"))
                     {
@@ -626,6 +627,7 @@ static class Program
         if (appSettings == null || IsPaused) return;
         
         bool activityDetected = false;
+        string activityType = "";
         DateTime now = DateTime.Now;
         uint currentTime = GetTickCount();
         
@@ -636,8 +638,7 @@ static class Program
             lastInputTime = currentInputTime;
             lastActivityTime = currentTime;
             activityDetected = true;
-            if (verboseLogging)
-                Logger.Debug("Keyboard/Mouse activity detected");
+            activityType = "Keyboard/Mouse";
         }
         
         // Check controller activity
@@ -653,62 +654,68 @@ static class Program
                     lastControllerPackets[i] = state.dwPacketNumber;
                     lastActivityTime = currentTime;
                     activityDetected = true;
-                    if (verboseLogging)
-                        Logger.Debug($"Controller {i + 1} activity detected");
+                    activityType = $"Controller {i + 1}";
                 }
             }
         }
         
-        if (!activityDetected)
+        // Calculate idle time since last activity
+        uint idleTimeMs = lastActivityTime > 0 ? currentTime - lastActivityTime : 0;
+        uint idleTimeSeconds = idleTimeMs / 1000;
+        uint timeoutSeconds = (uint)(appSettings.TimeoutMinutes * 60);
+        
+        // Verbose logging - show status every 5 seconds
+        if (verboseLogging)
         {
-            // Calculate idle time since last activity
-            uint idleTimeMs = lastActivityTime > 0 ? currentTime - lastActivityTime : 0;
-            uint idleTimeSeconds = idleTimeMs / 1000;
-            uint timeoutSeconds = (uint)(appSettings.TimeoutMinutes * 60);
-            
-            if (verboseLogging)
-                Logger.Debug($"No activity - idle for {idleTimeSeconds} seconds (timeout: {timeoutSeconds}s)");
-            
-            // Check if we've exceeded the timeout
-            if (idleTimeSeconds >= timeoutSeconds)
+            if (activityDetected)
             {
-                Logger.Info($"TIMEOUT REACHED! Triggering {appSettings.Mode}");
-                
-                if (appSettings.Mode == "Sleep")
-                {
-                    Logger.Info("Forcing system sleep");
-                    if (ForceSleep(hibernate: false, force: appSettings.GuaranteedSleep))
-                    {
-                        Logger.Info("Sleep command sent successfully");
-                    }
-                    else
-                    {
-                        Logger.Error("Failed to send sleep command");
-                    }
-                }
-                else if (appSettings.Mode == "Shutdown")
-                {
-                    Logger.Info("Forcing system shutdown");
-                    try
-                    {
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = "shutdown.exe",
-                            Arguments = "/s /t 0",
-                            UseShellExecute = false,
-                            CreateNoWindow = true
-                        });
-                        Logger.Info("Shutdown command sent successfully");
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Error("Failed to send shutdown command", ex);
-                    }
-                }
-                
-                // Reset activity timer to prevent immediate re-triggering
-                lastActivityTime = currentTime;
+                Logger.Info($"{activityType} activity detected");
             }
+            else
+            {
+                Logger.Info($"No activity detected since {idleTimeSeconds} seconds (timeout: {timeoutSeconds}s)");
+            }
+        }
+        
+        // Check if we've exceeded the timeout (only if no activity)
+        if (!activityDetected && idleTimeSeconds >= timeoutSeconds)
+        {
+            Logger.Info($"TIMEOUT REACHED! Triggering {appSettings.Mode}");
+            
+            if (appSettings.Mode == "Sleep")
+            {
+                Logger.Info("Forcing system sleep");
+                if (ForceSleep(hibernate: false, force: appSettings.GuaranteedSleep))
+                {
+                    Logger.Info("Sleep command sent successfully");
+                }
+                else
+                {
+                    Logger.Error("Failed to send sleep command");
+                }
+            }
+            else if (appSettings.Mode == "Shutdown")
+            {
+                Logger.Info("Forcing system shutdown");
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "shutdown.exe",
+                        Arguments = "/s /t 0",
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    });
+                    Logger.Info("Shutdown command sent successfully");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Failed to send shutdown command", ex);
+                }
+            }
+            
+            // Reset activity timer to prevent immediate re-triggering
+            lastActivityTime = currentTime;
         }
     }
 
@@ -772,8 +779,23 @@ static class Program
                 Logger.Info($"Timeout: {appSettings.TimeoutMinutes} minutes, Mode: {appSettings.Mode}");
                 
                 Logger.Debug("Starting main application loop with Form1");
-                mainForm = new Form1(appSettings);
-                Application.Run(mainForm);
+                try
+                {
+                    mainForm = new Form1(appSettings);
+                    Application.Run(mainForm);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Failed to start Windows Forms application", ex);
+                    Logger.Info("Application will continue with background monitoring only");
+                    
+                    // Keep the application alive with manual timer calls
+                    while (true)
+                    {
+                        Thread.Sleep(appSettings.CheckIntervalSeconds * 1000);
+                        CheckActivity(null, EventArgs.Empty);
+                    }
+                }
                 
                 Logger.Debug("Application loop ended");
                 
