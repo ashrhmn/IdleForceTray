@@ -11,11 +11,11 @@
 - [x] Implement settings persistence with JSON
 - [x] Implement startup toggle using ShellLink with Task Scheduler fallback
 - [x] Implement logging with rolling files
-- [ ] Implement timer loop with try/catch protection
+- [x] Implement timer loop with try/catch protection
 - [ ] Implement elevation prompt helper for Guaranteed Sleep toggle
 
 ## Testing
-- [ ] Write unit tests for idle math and settings
+- [x] Write unit tests for idle math and settings
 
 ## Build & Deployment
 - [ ] Provide publish profile for single file self-contained win-x64, trim true

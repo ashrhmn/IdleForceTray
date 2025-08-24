@@ -624,98 +624,165 @@ static class Program
 
     private static void CheckActivity(object? sender, EventArgs e)
     {
-        if (appSettings == null || IsPaused) return;
-        
-        bool activityDetected = false;
-        string activityType = "";
-        DateTime now = DateTime.Now;
-        uint currentTime = GetTickCount();
-        
-        // Check keyboard/mouse activity
-        uint currentInputTime = GetLastInputTime();
-        if (currentInputTime != 0 && currentInputTime != lastInputTime)
+        try
         {
-            lastInputTime = currentInputTime;
-            lastActivityTime = currentTime;
-            activityDetected = true;
-            activityType = "Keyboard/Mouse";
-        }
-        
-        // Check controller activity
-        for (uint i = 0; i < 4; i++)
-        {
-            XINPUT_STATE state = new XINPUT_STATE();
-            uint result = XInputGetState(i, ref state);
+            if (appSettings == null || IsPaused) return;
             
-            if (result == 0) // Controller connected
+            bool activityDetected = false;
+            string activityType = "";
+            uint currentTime = 0;
+            
+            // Get current time safely
+            try
             {
-                if (state.dwPacketNumber != lastControllerPackets[i])
+                currentTime = GetTickCount();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Failed to get current time", ex);
+                return; // Can't continue without current time
+            }
+            
+            // Check keyboard/mouse activity
+            try
+            {
+                uint currentInputTime = GetLastInputTime();
+                if (currentInputTime != 0 && currentInputTime != lastInputTime)
                 {
-                    lastControllerPackets[i] = state.dwPacketNumber;
+                    lastInputTime = currentInputTime;
                     lastActivityTime = currentTime;
                     activityDetected = true;
-                    activityType = $"Controller {i + 1}";
+                    activityType = "Keyboard/Mouse";
                 }
             }
-        }
-        
-        // Calculate idle time since last activity
-        uint idleTimeMs = lastActivityTime > 0 ? currentTime - lastActivityTime : 0;
-        uint idleTimeSeconds = idleTimeMs / 1000;
-        uint timeoutSeconds = (uint)(appSettings.TimeoutMinutes * 60);
-        
-        // Verbose logging - show status every 5 seconds
-        if (verboseLogging)
-        {
-            if (activityDetected)
+            catch (Exception ex)
             {
-                Logger.Info($"{activityType} activity detected");
+                Logger.Error("Failed to check keyboard/mouse activity", ex);
+                // Continue with controller check even if input check fails
             }
-            else
-            {
-                Logger.Info($"No activity detected since {idleTimeSeconds} seconds (timeout: {timeoutSeconds}s)");
-            }
-        }
-        
-        // Check if we've exceeded the timeout (only if no activity)
-        if (!activityDetected && idleTimeSeconds >= timeoutSeconds)
-        {
-            Logger.Info($"TIMEOUT REACHED! Triggering {appSettings.Mode}");
             
-            if (appSettings.Mode == "Sleep")
+            // Check controller activity
+            try
             {
-                Logger.Info("Forcing system sleep");
-                if (ForceSleep(hibernate: false, force: appSettings.GuaranteedSleep))
+                for (uint i = 0; i < 4; i++)
                 {
-                    Logger.Info("Sleep command sent successfully");
-                }
-                else
-                {
-                    Logger.Error("Failed to send sleep command");
+                    try
+                    {
+                        XINPUT_STATE state = new XINPUT_STATE();
+                        uint result = XInputGetState(i, ref state);
+                        
+                        if (result == 0) // Controller connected
+                        {
+                            if (state.dwPacketNumber != lastControllerPackets[i])
+                            {
+                                lastControllerPackets[i] = state.dwPacketNumber;
+                                lastActivityTime = currentTime;
+                                activityDetected = true;
+                                activityType = $"Controller {i + 1}";
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error($"Failed to check controller {i + 1} activity", ex);
+                        // Continue checking other controllers
+                    }
                 }
             }
-            else if (appSettings.Mode == "Shutdown")
+            catch (Exception ex)
             {
-                Logger.Info("Forcing system shutdown");
+                Logger.Error("Failed to check controller activity", ex);
+                // Continue with timeout check
+            }
+            
+            // Calculate idle time since last activity
+            uint idleTimeMs = lastActivityTime > 0 ? currentTime - lastActivityTime : 0;
+            uint idleTimeSeconds = idleTimeMs / 1000;
+            uint timeoutSeconds = (uint)(appSettings.TimeoutMinutes * 60);
+            
+            // Verbose logging - show status every 5 seconds
+            if (verboseLogging)
+            {
                 try
                 {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    if (activityDetected)
                     {
-                        FileName = "shutdown.exe",
-                        Arguments = "/s /t 0",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    });
-                    Logger.Info("Shutdown command sent successfully");
+                        Logger.Info($"{activityType} activity detected");
+                    }
+                    else
+                    {
+                        Logger.Info($"No activity detected since {idleTimeSeconds} seconds (timeout: {timeoutSeconds}s)");
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error("Failed to send shutdown command", ex);
+                    Logger.Error("Failed to log activity status", ex);
                 }
             }
             
-            // Reset activity timer to prevent immediate re-triggering
-            lastActivityTime = currentTime;
+            // Check if we've exceeded the timeout (only if no activity)
+            if (!activityDetected && idleTimeSeconds >= timeoutSeconds)
+            {
+                try
+                {
+                    Logger.Info($"TIMEOUT REACHED! Triggering {appSettings.Mode}");
+                    
+                    if (appSettings.Mode == "Sleep")
+                    {
+                        Logger.Info("Forcing system sleep");
+                        if (ForceSleep(hibernate: false, force: appSettings.GuaranteedSleep))
+                        {
+                            Logger.Info("Sleep command sent successfully");
+                        }
+                        else
+                        {
+                            Logger.Error("Failed to send sleep command");
+                        }
+                    }
+                    else if (appSettings.Mode == "Shutdown")
+                    {
+                        Logger.Info("Forcing system shutdown");
+                        try
+                        {
+                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = "shutdown.exe",
+                                Arguments = "/s /t 0",
+                                UseShellExecute = false,
+                                CreateNoWindow = true
+                            });
+                            Logger.Info("Shutdown command sent successfully");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Error("Failed to send shutdown command", ex);
+                        }
+                    }
+                    
+                    // Reset activity timer to prevent immediate re-triggering
+                    lastActivityTime = currentTime;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Failed to handle timeout action", ex);
+                    // Reset timer to prevent continuous failures
+                    lastActivityTime = currentTime;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Critical error in activity monitoring timer", ex);
+            // Try to reset activity time to prevent getting stuck
+            try
+            {
+                lastActivityTime = GetTickCount();
+            }
+            catch
+            {
+                // If we can't even get the current time, just continue
+                // The timer will try again on the next interval
+            }
         }
     }
 
