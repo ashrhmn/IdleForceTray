@@ -18,7 +18,7 @@
 - [x] Write unit tests for idle math and settings
 
 ## Build & Deployment
-- [ ] Provide publish profile for single file self-contained win-x64, trim true
+- [x] Provide publish profile for single file self-contained win-x64, trim true
 
 ## Instructions for AI Assistant
 Please mark items as completed in this TODO.md file every time you finish a task by changing `[ ]` to `[x]`. This helps track progress and ensures nothing is missed.
