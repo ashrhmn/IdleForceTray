@@ -275,18 +275,42 @@ public partial class Form1 : Form
                                        MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (result == DialogResult.Yes)
             {
-                // TODO: Implement elevation and powercfg -h off call
-                appSettings.GuaranteedSleep = true;
-                SettingsManager.SaveSettings(appSettings);
-                MessageBox.Show("Guaranteed Sleep enabled. Hibernate has been disabled.", "IdleForce", 
-                              MessageBoxButtons.OK, MessageBoxIcon.Information);
+                // Check if hibernation is currently enabled
+                bool hibernationEnabled = Program.IsHibernationEnabled();
+                
+                if (hibernationEnabled)
+                {
+                    // Disable hibernation using elevation if needed
+                    bool success = Program.DisableHibernation();
+                    
+                    if (success)
+                    {
+                        appSettings.GuaranteedSleep = true;
+                        SettingsManager.SaveSettings(appSettings);
+                        MessageBox.Show("Guaranteed Sleep enabled. Hibernate has been disabled.", "IdleForce", 
+                                      MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        MessageBox.Show("Failed to disable hibernation. Guaranteed Sleep was not enabled.", "IdleForce Error", 
+                                      MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
+                else
+                {
+                    // Hibernation is already disabled
+                    appSettings.GuaranteedSleep = true;
+                    SettingsManager.SaveSettings(appSettings);
+                    MessageBox.Show("Guaranteed Sleep enabled. Hibernation was already disabled.", "IdleForce", 
+                                  MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
             }
         }
         else
         {
             appSettings.GuaranteedSleep = false;
             SettingsManager.SaveSettings(appSettings);
-            MessageBox.Show("Guaranteed Sleep disabled.", "IdleForce", 
+            MessageBox.Show("Guaranteed Sleep disabled. Note: Hibernation settings were not changed.", "IdleForce", 
                           MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         

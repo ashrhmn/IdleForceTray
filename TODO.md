@@ -12,7 +12,7 @@
 - [x] Implement startup toggle using ShellLink with Task Scheduler fallback
 - [x] Implement logging with rolling files
 - [x] Implement timer loop with try/catch protection
-- [ ] Implement elevation prompt helper for Guaranteed Sleep toggle
+- [x] Implement elevation prompt helper for Guaranteed Sleep toggle
 
 ## Testing
 - [x] Write unit tests for idle math and settings

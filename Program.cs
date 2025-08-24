@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Reflection;
 using System.Text;
+using IdleForceTray.Tests;
 
 namespace IdleForceTray;
 
@@ -571,6 +572,152 @@ static class Program
 
     #endregion
 
+    #region Elevation and Power Management
+    
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+    
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(IntPtr TokenHandle, int TokenInformationClass, IntPtr TokenInformation, uint TokenInformationLength, out uint ReturnLength);
+    
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetCurrentProcess();
+    
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
+    
+    private const int TokenElevationType = 18;
+    private const int TokenElevationTypeDefault = 1;
+    private const int TokenElevationTypeFull = 2;
+    private const int TokenElevationTypeLimited = 3;
+    
+    public static bool IsRunningAsAdministrator()
+    {
+        try
+        {
+            IntPtr tokenHandle = IntPtr.Zero;
+            try
+            {
+                if (!OpenProcessToken(GetCurrentProcess(), 0x0008, out tokenHandle))
+                    return false;
+                
+                IntPtr elevationTypePtr = Marshal.AllocHGlobal(sizeof(int));
+                try
+                {
+                    uint returnLength;
+                    if (!GetTokenInformation(tokenHandle, TokenElevationType, elevationTypePtr, (uint)sizeof(int), out returnLength))
+                        return false;
+                    
+                    int elevationType = Marshal.ReadInt32(elevationTypePtr);
+                    return elevationType == TokenElevationTypeFull;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(elevationTypePtr);
+                }
+            }
+            finally
+            {
+                if (tokenHandle != IntPtr.Zero)
+                    CloseHandle(tokenHandle);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to check elevation status", ex);
+            return false;
+        }
+    }
+    
+    public static bool DisableHibernation()
+    {
+        try
+        {
+            Logger.Info("Attempting to disable hibernation using powercfg -h off");
+            
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "powercfg.exe",
+                Arguments = "-h off",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                Verb = "runas" // Request elevation
+            };
+            
+            using (var process = System.Diagnostics.Process.Start(startInfo))
+            {
+                if (process != null)
+                {
+                    process.WaitForExit(10000); // Wait up to 10 seconds
+                    string output = process.StandardOutput.ReadToEnd();
+                    string error = process.StandardError.ReadToEnd();
+                    
+                    if (process.ExitCode == 0)
+                    {
+                        Logger.Info("Successfully disabled hibernation");
+                        return true;
+                    }
+                    else
+                    {
+                        Logger.Error($"powercfg -h off failed with exit code {process.ExitCode}. Output: {output}. Error: {error}");
+                        return false;
+                    }
+                }
+            }
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            // User cancelled elevation prompt
+            Logger.Info("User cancelled elevation prompt for hibernation disable");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to disable hibernation", ex);
+            return false;
+        }
+        
+        return false;
+    }
+    
+    public static bool IsHibernationEnabled()
+    {
+        try
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "powercfg.exe",
+                Arguments = "/a",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            
+            using (var process = System.Diagnostics.Process.Start(startInfo))
+            {
+                if (process != null)
+                {
+                    process.WaitForExit(5000);
+                    string output = process.StandardOutput.ReadToEnd();
+                    
+                    // Check if hibernate is available in the output
+                    return output.Contains("Hibernate", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to check hibernation status", ex);
+        }
+        
+        return false; // Assume disabled if we can't check
+    }
+    
+    #endregion
+
     private static void ParseCommandLineArgs(string[] args)
     {
         for (int i = 0; i < args.Length; i++)
@@ -595,6 +742,13 @@ static class Program
                     Environment.Exit(0);
                     break;
                     
+                case "-t":
+                case "--test":
+                case "/t":
+                case "/test":
+                    ElevationTests.RunAllTests();
+                    Environment.Exit(0);
+                    break;
                     
                 default:
                     if (arg.StartsWith("-") || arg.StartsWith("/"))
@@ -616,6 +770,7 @@ static class Program
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  -v, --verbose    Enable verbose activity logging (logs every 5 seconds)");
+        Console.WriteLine("  -t, --test       Run elevation helper tests (for development/troubleshooting)");
         Console.WriteLine("  -h, --help       Show this help message");
         Console.WriteLine();
         Console.WriteLine("The application runs in the system tray. Right-click the tray icon");
