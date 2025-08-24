@@ -101,6 +101,10 @@ public static class SettingsManager
 
 static class Program
 {
+    private static System.Windows.Forms.Timer? activityTimer;
+    private static uint lastInputTime = 0;
+    private static uint[] lastControllerPackets = new uint[4];
+
     #region Windows API Declarations
 
     // Structure for GetLastInputInfo
@@ -216,28 +220,113 @@ static class Program
 
     #endregion
 
+    private static void CheckActivity(object? sender, EventArgs e)
+    {
+        bool activityDetected = false;
+        DateTime now = DateTime.Now;
+        
+        // Check keyboard/mouse activity
+        uint currentInputTime = GetLastInputTime();
+        if (currentInputTime != 0 && currentInputTime != lastInputTime)
+        {
+            lastInputTime = currentInputTime;
+            activityDetected = true;
+            Console.WriteLine($"[{now:HH:mm:ss}] Keyboard/Mouse activity detected");
+        }
+        
+        // Check controller activity
+        for (uint i = 0; i < 4; i++)
+        {
+            XINPUT_STATE state = new XINPUT_STATE();
+            uint result = XInputGetState(i, ref state);
+            
+            if (result == 0) // Controller connected
+            {
+                if (state.dwPacketNumber != lastControllerPackets[i])
+                {
+                    lastControllerPackets[i] = state.dwPacketNumber;
+                    activityDetected = true;
+                    Console.WriteLine($"[{now:HH:mm:ss}] Controller {i + 1} activity detected");
+                }
+            }
+        }
+        
+        if (!activityDetected)
+        {
+            // Calculate idle time
+            uint systemUptime = GetTickCount();
+            uint idleTime = currentInputTime > 0 ? systemUptime - currentInputTime : 0;
+            Console.WriteLine($"[{now:HH:mm:ss}] No activity - idle for {idleTime / 1000} seconds");
+        }
+    }
+
     /// <summary>
     ///  The main entry point for the application.
     /// </summary>
     [STAThread]
     static void Main()
     {
-        // Single instance check using named mutex
-        using (var mutex = new Mutex(true, @"Global\IdleForceTray", out bool createdNew))
+        try
         {
-            if (!createdNew)
+            Console.WriteLine("IdleForce Tray starting...");
+            
+            // Single instance check using named mutex
+            using (var mutex = new Mutex(true, @"Global\IdleForceTray", out bool createdNew))
             {
-                // Another instance is already running, exit silently
-                return;
+                if (!createdNew)
+                {
+                    Console.WriteLine("Another instance is already running, exiting");
+                    return;
+                }
+
+                Console.WriteLine("Single instance check passed");
+
+                // Load settings at startup
+                var settings = SettingsManager.LoadSettings();
+                Console.WriteLine("Settings loaded successfully");
+
+                // To customize application configuration such as set high DPI settings or default font,
+                // see https://aka.ms/applicationconfiguration.
+                ApplicationConfiguration.Initialize();
+                Console.WriteLine("Application configuration initialized");
+
+                // Initialize activity monitoring
+                Console.WriteLine("Initializing activity monitoring...");
+                lastInputTime = GetLastInputTime();
+                
+                // Initialize controller packet numbers
+                for (uint i = 0; i < 4; i++)
+                {
+                    XINPUT_STATE state = new XINPUT_STATE();
+                    if (XInputGetState(i, ref state) == 0)
+                    {
+                        lastControllerPackets[i] = state.dwPacketNumber;
+                        Console.WriteLine($"Controller {i + 1} detected");
+                    }
+                }
+                
+                // Start activity monitoring timer
+                activityTimer = new System.Windows.Forms.Timer();
+                activityTimer.Interval = 5000; // 5 seconds
+                activityTimer.Tick += CheckActivity;
+                activityTimer.Start();
+                Console.WriteLine("Activity monitoring timer started - checking every 5 seconds");
+                
+                Console.WriteLine("Starting main application loop with Form1...");
+                Application.Run(new Form1());
+                
+                Console.WriteLine("Application loop ended");
+                
+                // Clean up
+                activityTimer?.Stop();
+                activityTimer?.Dispose();
+                Console.WriteLine("Cleanup completed");
             }
-
-            // Load settings at startup
-            var settings = SettingsManager.LoadSettings();
-
-            // To customize application configuration such as set high DPI settings or default font,
-            // see https://aka.ms/applicationconfiguration.
-            ApplicationConfiguration.Initialize();
-            Application.Run(new Form1());
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Fatal error: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
         }
     }    
 }
