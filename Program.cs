@@ -253,6 +253,7 @@ static class Program
     private static uint lastActivityTime = 0;
     private static Settings? appSettings;
     private static Form1? mainForm;
+    private static bool verboseLogging = false;
     
     public static bool IsPaused => mainForm?.IsPaused ?? false;
 
@@ -570,6 +571,56 @@ static class Program
 
     #endregion
 
+    private static void ParseCommandLineArgs(string[] args)
+    {
+        for (int i = 0; i < args.Length; i++)
+        {
+            string arg = args[i].ToLowerInvariant();
+            
+            switch (arg)
+            {
+                case "-v":
+                case "--verbose":
+                case "/v":
+                case "/verbose":
+                    verboseLogging = true;
+                    break;
+                    
+                case "-h":
+                case "--help":
+                case "/h":
+                case "/help":
+                case "/?":
+                    ShowHelp();
+                    Environment.Exit(0);
+                    break;
+                    
+                default:
+                    if (arg.StartsWith("-") || arg.StartsWith("/"))
+                    {
+                        Console.WriteLine($"Unknown argument: {args[i]}");
+                        Console.WriteLine("Use --help for usage information.");
+                        Environment.Exit(1);
+                    }
+                    break;
+            }
+        }
+    }
+    
+    private static void ShowHelp()
+    {
+        Console.WriteLine("IdleForce Tray - Auto Sleep/Shutdown Tool");
+        Console.WriteLine();
+        Console.WriteLine("Usage: IdleForceTray.exe [options]");
+        Console.WriteLine();
+        Console.WriteLine("Options:");
+        Console.WriteLine("  -v, --verbose    Enable verbose activity logging (logs every 5 seconds)");
+        Console.WriteLine("  -h, --help       Show this help message");
+        Console.WriteLine();
+        Console.WriteLine("The application runs in the system tray. Right-click the tray icon");
+        Console.WriteLine("to access settings and controls.");
+    }
+
     private static void CheckActivity(object? sender, EventArgs e)
     {
         if (appSettings == null || IsPaused) return;
@@ -585,7 +636,8 @@ static class Program
             lastInputTime = currentInputTime;
             lastActivityTime = currentTime;
             activityDetected = true;
-            Logger.Debug("Keyboard/Mouse activity detected");
+            if (verboseLogging)
+                Logger.Debug("Keyboard/Mouse activity detected");
         }
         
         // Check controller activity
@@ -601,7 +653,8 @@ static class Program
                     lastControllerPackets[i] = state.dwPacketNumber;
                     lastActivityTime = currentTime;
                     activityDetected = true;
-                    Logger.Debug($"Controller {i + 1} activity detected");
+                    if (verboseLogging)
+                        Logger.Debug($"Controller {i + 1} activity detected");
                 }
             }
         }
@@ -613,7 +666,8 @@ static class Program
             uint idleTimeSeconds = idleTimeMs / 1000;
             uint timeoutSeconds = (uint)(appSettings.TimeoutMinutes * 60);
             
-            Logger.Debug($"No activity - idle for {idleTimeSeconds} seconds (timeout: {timeoutSeconds}s)");
+            if (verboseLogging)
+                Logger.Debug($"No activity - idle for {idleTimeSeconds} seconds (timeout: {timeoutSeconds}s)");
             
             // Check if we've exceeded the timeout
             if (idleTimeSeconds >= timeoutSeconds)
@@ -662,11 +716,16 @@ static class Program
     ///  The main entry point for the application.
     /// </summary>
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
         try
         {
+            // Parse command line arguments
+            ParseCommandLineArgs(args);
+            
             Logger.Info("IdleForce Tray starting");
+            if (verboseLogging)
+                Logger.Info("Verbose activity logging enabled");
             
             // Single instance check using named mutex
             using (var mutex = new Mutex(true, @"Global\IdleForceTray", out bool createdNew))
