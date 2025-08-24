@@ -7,6 +7,145 @@ using System.Text;
 
 namespace IdleForceTray;
 
+public enum LogLevel
+{
+    Debug = 0,
+    Info = 1,
+    Warn = 2,
+    Error = 3
+}
+
+public static class Logger
+{
+    private static readonly string LogDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), 
+        "IdleForce", "logs");
+    
+    private static readonly string LogFilePath = Path.Combine(LogDirectory, "IdleForce.log");
+    private static readonly object LogLock = new object();
+    private const long MaxLogFileSize = 1024 * 1024; // 1 MB
+    private const int MaxLogFiles = 3;
+    
+    private static LogLevel currentLogLevel = LogLevel.Info;
+    
+    public static void SetLogLevel(LogLevel level)
+    {
+        currentLogLevel = level;
+    }
+    
+    public static void SetLogLevel(string level)
+    {
+        if (Enum.TryParse<LogLevel>(level, true, out var logLevel))
+        {
+            currentLogLevel = logLevel;
+        }
+    }
+    
+    public static void Debug(string message)
+    {
+        Log(LogLevel.Debug, message);
+    }
+    
+    public static void Info(string message)
+    {
+        Log(LogLevel.Info, message);
+    }
+    
+    public static void Warn(string message)
+    {
+        Log(LogLevel.Warn, message);
+    }
+    
+    public static void Error(string message)
+    {
+        Log(LogLevel.Error, message);
+    }
+    
+    public static void Error(string message, Exception ex)
+    {
+        Log(LogLevel.Error, $"{message}: {ex.Message}");
+        Log(LogLevel.Debug, $"Stack trace: {ex.StackTrace}");
+    }
+    
+    private static void Log(LogLevel level, string message)
+    {
+        if (level < currentLogLevel) return;
+        
+        try
+        {
+            lock (LogLock)
+            {
+                // Ensure directory exists
+                if (!Directory.Exists(LogDirectory))
+                {
+                    Directory.CreateDirectory(LogDirectory);
+                }
+                
+                // Check if rotation is needed
+                if (File.Exists(LogFilePath))
+                {
+                    var fileInfo = new FileInfo(LogFilePath);
+                    if (fileInfo.Length >= MaxLogFileSize)
+                    {
+                        RotateLogFiles();
+                    }
+                }
+                
+                // Write log entry
+                string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+                string levelStr = level.ToString().ToUpper().PadRight(5);
+                string logEntry = $"[{timestamp}] [{levelStr}] {message}";
+                
+                File.AppendAllText(LogFilePath, logEntry + Environment.NewLine);
+                
+                // Also output to console for debugging
+                Console.WriteLine(logEntry);
+            }
+        }
+        catch (Exception)
+        {
+            // Logging failed - write to console as fallback
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [LOG ERROR] Failed to write log: {message}");
+        }
+    }
+    
+    private static void RotateLogFiles()
+    {
+        try
+        {
+            // Delete oldest log file if it exists
+            string oldestLogFile = Path.Combine(LogDirectory, $"IdleForce.{MaxLogFiles - 1}.log");
+            if (File.Exists(oldestLogFile))
+            {
+                File.Delete(oldestLogFile);
+            }
+            
+            // Rotate existing log files
+            for (int i = MaxLogFiles - 2; i >= 1; i--)
+            {
+                string sourceFile = Path.Combine(LogDirectory, $"IdleForce.{i}.log");
+                string destFile = Path.Combine(LogDirectory, $"IdleForce.{i + 1}.log");
+                
+                if (File.Exists(sourceFile))
+                {
+                    File.Move(sourceFile, destFile);
+                }
+            }
+            
+            // Move current log file to .1
+            string firstRotatedFile = Path.Combine(LogDirectory, "IdleForce.1.log");
+            if (File.Exists(LogFilePath))
+            {
+                File.Move(LogFilePath, firstRotatedFile);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [LOG ERROR] Failed to rotate log files: {ex.Message}");
+        }
+    }
+}
+
 public class Settings
 {
     public string Mode { get; set; } = "Sleep";
@@ -65,6 +204,9 @@ public static class SettingsManager
                 var settings = JsonSerializer.Deserialize<Settings>(json, JsonOptions) ?? new Settings();
                 settings.ValidateAndCorrect();
                 
+                // Initialize logger with settings log level
+                Logger.SetLogLevel(settings.LogLevel);
+                
                 // Save corrected settings back if validation changed anything
                 SaveSettings(settings);
                 return settings;
@@ -77,6 +219,7 @@ public static class SettingsManager
 
         // Return defaults and save them
         var defaultSettings = new Settings();
+        Logger.SetLogLevel(defaultSettings.LogLevel);
         SaveSettings(defaultSettings);
         return defaultSettings;
     }
@@ -442,7 +585,7 @@ static class Program
             lastInputTime = currentInputTime;
             lastActivityTime = currentTime;
             activityDetected = true;
-            Console.WriteLine($"[{now:HH:mm:ss}] Keyboard/Mouse activity detected");
+            Logger.Debug("Keyboard/Mouse activity detected");
         }
         
         // Check controller activity
@@ -458,7 +601,7 @@ static class Program
                     lastControllerPackets[i] = state.dwPacketNumber;
                     lastActivityTime = currentTime;
                     activityDetected = true;
-                    Console.WriteLine($"[{now:HH:mm:ss}] Controller {i + 1} activity detected");
+                    Logger.Debug($"Controller {i + 1} activity detected");
                 }
             }
         }
@@ -470,28 +613,28 @@ static class Program
             uint idleTimeSeconds = idleTimeMs / 1000;
             uint timeoutSeconds = (uint)(appSettings.TimeoutMinutes * 60);
             
-            Console.WriteLine($"[{now:HH:mm:ss}] No activity - idle for {idleTimeSeconds} seconds (timeout: {timeoutSeconds}s)");
+            Logger.Debug($"No activity - idle for {idleTimeSeconds} seconds (timeout: {timeoutSeconds}s)");
             
             // Check if we've exceeded the timeout
             if (idleTimeSeconds >= timeoutSeconds)
             {
-                Console.WriteLine($"[{now:HH:mm:ss}] TIMEOUT REACHED! Triggering {appSettings.Mode}...");
+                Logger.Info($"TIMEOUT REACHED! Triggering {appSettings.Mode}");
                 
                 if (appSettings.Mode == "Sleep")
                 {
-                    Console.WriteLine($"[{now:HH:mm:ss}] Forcing system sleep...");
+                    Logger.Info("Forcing system sleep");
                     if (ForceSleep(hibernate: false, force: appSettings.GuaranteedSleep))
                     {
-                        Console.WriteLine($"[{now:HH:mm:ss}] Sleep command sent successfully");
+                        Logger.Info("Sleep command sent successfully");
                     }
                     else
                     {
-                        Console.WriteLine($"[{now:HH:mm:ss}] Failed to send sleep command");
+                        Logger.Error("Failed to send sleep command");
                     }
                 }
                 else if (appSettings.Mode == "Shutdown")
                 {
-                    Console.WriteLine($"[{now:HH:mm:ss}] Forcing system shutdown...");
+                    Logger.Info("Forcing system shutdown");
                     try
                     {
                         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
@@ -501,11 +644,11 @@ static class Program
                             UseShellExecute = false,
                             CreateNoWindow = true
                         });
-                        Console.WriteLine($"[{now:HH:mm:ss}] Shutdown command sent successfully");
+                        Logger.Info("Shutdown command sent successfully");
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[{now:HH:mm:ss}] Failed to send shutdown command: {ex.Message}");
+                        Logger.Error("Failed to send shutdown command", ex);
                     }
                 }
                 
@@ -523,30 +666,30 @@ static class Program
     {
         try
         {
-            Console.WriteLine("IdleForce Tray starting...");
+            Logger.Info("IdleForce Tray starting");
             
             // Single instance check using named mutex
             using (var mutex = new Mutex(true, @"Global\IdleForceTray", out bool createdNew))
             {
                 if (!createdNew)
                 {
-                    Console.WriteLine("Another instance is already running, exiting");
+                    Logger.Info("Another instance is already running, exiting");
                     return;
                 }
 
-                Console.WriteLine("Single instance check passed");
+                Logger.Debug("Single instance check passed");
 
                 // Load settings at startup
                 appSettings = SettingsManager.LoadSettings();
-                Console.WriteLine("Settings loaded successfully");
+                Logger.Info("Settings loaded successfully");
 
                 // To customize application configuration such as set high DPI settings or default font,
                 // see https://aka.ms/applicationconfiguration.
                 ApplicationConfiguration.Initialize();
-                Console.WriteLine("Application configuration initialized");
+                Logger.Debug("Application configuration initialized");
 
                 // Initialize activity monitoring
-                Console.WriteLine("Initializing activity monitoring...");
+                Logger.Debug("Initializing activity monitoring");
                 lastInputTime = GetLastInputTime();
                 lastActivityTime = GetTickCount();
                 
@@ -557,7 +700,7 @@ static class Program
                     if (XInputGetState(i, ref state) == 0)
                     {
                         lastControllerPackets[i] = state.dwPacketNumber;
-                        Console.WriteLine($"Controller {i + 1} detected");
+                        Logger.Info($"Controller {i + 1} detected");
                     }
                 }
                 
@@ -566,25 +709,24 @@ static class Program
                 activityTimer.Interval = appSettings.CheckIntervalSeconds * 1000; // Convert to milliseconds
                 activityTimer.Tick += CheckActivity;
                 activityTimer.Start();
-                Console.WriteLine($"Activity monitoring timer started - checking every {appSettings.CheckIntervalSeconds} seconds");
-                Console.WriteLine($"Timeout: {appSettings.TimeoutMinutes} minutes, Mode: {appSettings.Mode}");
+                Logger.Info($"Activity monitoring timer started - checking every {appSettings.CheckIntervalSeconds} seconds");
+                Logger.Info($"Timeout: {appSettings.TimeoutMinutes} minutes, Mode: {appSettings.Mode}");
                 
-                Console.WriteLine("Starting main application loop with Form1...");
+                Logger.Debug("Starting main application loop with Form1");
                 mainForm = new Form1(appSettings);
                 Application.Run(mainForm);
                 
-                Console.WriteLine("Application loop ended");
+                Logger.Debug("Application loop ended");
                 
                 // Clean up
                 activityTimer?.Stop();
                 activityTimer?.Dispose();
-                Console.WriteLine("Cleanup completed");
+                Logger.Debug("Cleanup completed");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Fatal error: {ex.Message}");
-            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            Logger.Error("Fatal error", ex);
         }
     }    
 }
