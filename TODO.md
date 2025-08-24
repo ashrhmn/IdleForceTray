@@ -5,7 +5,7 @@
 - [x] Create WinForms project named IdleForceTray on .NET 8
 
 ## Core Implementation
-- [ ] Add PInvoke for GetLastInputInfo, SetSuspendState, XInputGetState with three DLL names
+- [x] Add PInvoke for GetLastInputInfo, SetSuspendState, XInputGetState with three DLL names
 - [ ] Implement named mutex for single instance
 - [ ] Implement tray NotifyIcon with context menu and event handlers
 - [ ] Implement settings persistence with JSON
