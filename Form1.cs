@@ -69,7 +69,7 @@ public partial class Form1 : Form
 
         // Timeout submenu
         timeoutSubmenu = new ToolStripMenuItem("Timeout");
-        var timeouts = new[] { 10, 15, 20, 30, 45 };
+        var timeouts = new[] { 1, 2, 5, 10, 15, 20, 30, 45 };
         foreach (var timeout in timeouts)
         {
             var timeoutItem = new ToolStripMenuItem($"{timeout}m", null, TimeoutItem_Click) 
