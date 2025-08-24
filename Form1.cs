@@ -16,13 +16,13 @@ public partial class Form1 : Form
 
     // Application state
     private bool isPaused = false;
-    private string currentMode = "Sleep";
-    private int timeoutMinutes = 20;
-    private bool guaranteedSleepEnabled = false;
-    private bool startWithWindows = true;
+    private Settings appSettings;
+    
+    public bool IsPaused => isPaused;
 
-    public Form1()
+    public Form1(Settings settings)
     {
+        appSettings = settings;
         InitializeComponent();
         InitializeTrayIcon();
         
@@ -62,8 +62,8 @@ public partial class Form1 : Form
 
         // Mode submenu
         modeSubmenu = new ToolStripMenuItem("Mode");
-        var sleepMode = new ToolStripMenuItem("Sleep", null, ModeItem_Click) { Tag = "Sleep", Checked = currentMode == "Sleep" };
-        var shutdownMode = new ToolStripMenuItem("Shutdown", null, ModeItem_Click) { Tag = "Shutdown", Checked = currentMode == "Shutdown" };
+        var sleepMode = new ToolStripMenuItem("Sleep", null, ModeItem_Click) { Tag = "Sleep", Checked = appSettings.Mode == "Sleep" };
+        var shutdownMode = new ToolStripMenuItem("Shutdown", null, ModeItem_Click) { Tag = "Shutdown", Checked = appSettings.Mode == "Shutdown" };
         modeSubmenu.DropDownItems.AddRange(new[] { sleepMode, shutdownMode });
         contextMenu.Items.Add(modeSubmenu);
 
@@ -75,7 +75,7 @@ public partial class Form1 : Form
             var timeoutItem = new ToolStripMenuItem($"{timeout}m", null, TimeoutItem_Click) 
             { 
                 Tag = timeout, 
-                Checked = timeout == timeoutMinutes 
+                Checked = timeout == appSettings.TimeoutMinutes 
             };
             timeoutSubmenu.DropDownItems.Add(timeoutItem);
         }
@@ -102,14 +102,14 @@ public partial class Form1 : Form
         // Guaranteed Sleep toggle
         guaranteedSleepItem = new ToolStripMenuItem("Guaranteed Sleep", null, GuaranteedSleep_Click) 
         { 
-            Checked = guaranteedSleepEnabled 
+            Checked = appSettings.GuaranteedSleep 
         };
         contextMenu.Items.Add(guaranteedSleepItem);
 
         // Start with Windows toggle
         startupItem = new ToolStripMenuItem("Start with Windows", null, Startup_Click) 
         { 
-            Checked = startWithWindows 
+            Checked = appSettings.StartWithWindows 
         };
         contextMenu.Items.Add(startupItem);
 
@@ -128,7 +128,7 @@ public partial class Form1 : Form
         }
         else
         {
-            statusLabel.Text = $"Status: Running, {currentMode} in {timeoutMinutes}m";
+            statusLabel.Text = $"Status: Running, {appSettings.Mode} in {appSettings.TimeoutMinutes}m";
         }
     }
 
@@ -140,7 +140,7 @@ public partial class Form1 : Form
         }
         else
         {
-            trayIcon.Text = $"IdleForce: running, {currentMode} in {timeoutMinutes}m";
+            trayIcon.Text = $"IdleForce: running, {appSettings.Mode} in {appSettings.TimeoutMinutes}m";
         }
     }
 
@@ -149,19 +149,19 @@ public partial class Form1 : Form
         // Update mode checks
         foreach (ToolStripMenuItem item in modeSubmenu.DropDownItems)
         {
-            item.Checked = (string)item.Tag == currentMode;
+            item.Checked = (string)item.Tag == appSettings.Mode;
         }
 
         // Update timeout checks
         foreach (ToolStripMenuItem item in timeoutSubmenu.DropDownItems)
         {
-            item.Checked = (int)item.Tag == timeoutMinutes;
+            item.Checked = (int)item.Tag == appSettings.TimeoutMinutes;
         }
 
         // Update other toggles
         pauseResumeItem.Text = isPaused ? "Resume" : "Pause";
-        guaranteedSleepItem.Checked = guaranteedSleepEnabled;
-        startupItem.Checked = startWithWindows;
+        guaranteedSleepItem.Checked = appSettings.GuaranteedSleep;
+        startupItem.Checked = appSettings.StartWithWindows;
     }
 
     #region Event Handlers
@@ -176,7 +176,8 @@ public partial class Form1 : Form
     {
         if (sender is ToolStripMenuItem item)
         {
-            currentMode = (string)item.Tag;
+            appSettings.Mode = (string)item.Tag;
+            SettingsManager.SaveSettings(appSettings);
             UpdateStatusLabel();
             UpdateTooltip();
             UpdateMenuChecks();
@@ -187,7 +188,8 @@ public partial class Form1 : Form
     {
         if (sender is ToolStripMenuItem item)
         {
-            timeoutMinutes = (int)item.Tag;
+            appSettings.TimeoutMinutes = (int)item.Tag;
+            SettingsManager.SaveSettings(appSettings);
             UpdateStatusLabel();
             UpdateTooltip();
             UpdateMenuChecks();
@@ -233,7 +235,7 @@ public partial class Form1 : Form
 
     private void GuaranteedSleep_Click(object sender, EventArgs e)
     {
-        var newState = !guaranteedSleepEnabled;
+        var newState = !appSettings.GuaranteedSleep;
         
         if (newState)
         {
@@ -242,14 +244,16 @@ public partial class Form1 : Form
             if (result == DialogResult.Yes)
             {
                 // TODO: Implement elevation and powercfg -h off call
-                guaranteedSleepEnabled = true;
+                appSettings.GuaranteedSleep = true;
+                SettingsManager.SaveSettings(appSettings);
                 MessageBox.Show("Guaranteed Sleep enabled. Hibernate has been disabled.", "IdleForce", 
                               MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
         else
         {
-            guaranteedSleepEnabled = false;
+            appSettings.GuaranteedSleep = false;
+            SettingsManager.SaveSettings(appSettings);
             MessageBox.Show("Guaranteed Sleep disabled.", "IdleForce", 
                           MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -259,9 +263,10 @@ public partial class Form1 : Form
 
     private void Startup_Click(object sender, EventArgs e)
     {
-        startWithWindows = !startWithWindows;
+        appSettings.StartWithWindows = !appSettings.StartWithWindows;
+        SettingsManager.SaveSettings(appSettings);
         // TODO: Implement startup shortcut creation/deletion
-        MessageBox.Show($"Start with Windows: {(startWithWindows ? "Enabled" : "Disabled")}", "IdleForce", 
+        MessageBox.Show($"Start with Windows: {(appSettings.StartWithWindows ? "Enabled" : "Disabled")}", "IdleForce", 
                        MessageBoxButtons.OK, MessageBoxIcon.Information);
         UpdateMenuChecks();
     }

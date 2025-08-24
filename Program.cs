@@ -104,6 +104,11 @@ static class Program
     private static System.Windows.Forms.Timer? activityTimer;
     private static uint lastInputTime = 0;
     private static uint[] lastControllerPackets = new uint[4];
+    private static uint lastActivityTime = 0;
+    private static Settings? appSettings;
+    private static Form1? mainForm;
+    
+    public static bool IsPaused => mainForm?.IsPaused ?? false;
 
     #region Windows API Declarations
 
@@ -222,14 +227,18 @@ static class Program
 
     private static void CheckActivity(object? sender, EventArgs e)
     {
+        if (appSettings == null || IsPaused) return;
+        
         bool activityDetected = false;
         DateTime now = DateTime.Now;
+        uint currentTime = GetTickCount();
         
         // Check keyboard/mouse activity
         uint currentInputTime = GetLastInputTime();
         if (currentInputTime != 0 && currentInputTime != lastInputTime)
         {
             lastInputTime = currentInputTime;
+            lastActivityTime = currentTime;
             activityDetected = true;
             Console.WriteLine($"[{now:HH:mm:ss}] Keyboard/Mouse activity detected");
         }
@@ -245,6 +254,7 @@ static class Program
                 if (state.dwPacketNumber != lastControllerPackets[i])
                 {
                     lastControllerPackets[i] = state.dwPacketNumber;
+                    lastActivityTime = currentTime;
                     activityDetected = true;
                     Console.WriteLine($"[{now:HH:mm:ss}] Controller {i + 1} activity detected");
                 }
@@ -253,10 +263,53 @@ static class Program
         
         if (!activityDetected)
         {
-            // Calculate idle time
-            uint systemUptime = GetTickCount();
-            uint idleTime = currentInputTime > 0 ? systemUptime - currentInputTime : 0;
-            Console.WriteLine($"[{now:HH:mm:ss}] No activity - idle for {idleTime / 1000} seconds");
+            // Calculate idle time since last activity
+            uint idleTimeMs = lastActivityTime > 0 ? currentTime - lastActivityTime : 0;
+            uint idleTimeSeconds = idleTimeMs / 1000;
+            uint timeoutSeconds = (uint)(appSettings.TimeoutMinutes * 60);
+            
+            Console.WriteLine($"[{now:HH:mm:ss}] No activity - idle for {idleTimeSeconds} seconds (timeout: {timeoutSeconds}s)");
+            
+            // Check if we've exceeded the timeout
+            if (idleTimeSeconds >= timeoutSeconds)
+            {
+                Console.WriteLine($"[{now:HH:mm:ss}] TIMEOUT REACHED! Triggering {appSettings.Mode}...");
+                
+                if (appSettings.Mode == "Sleep")
+                {
+                    Console.WriteLine($"[{now:HH:mm:ss}] Forcing system sleep...");
+                    if (ForceSleep(hibernate: false, force: appSettings.GuaranteedSleep))
+                    {
+                        Console.WriteLine($"[{now:HH:mm:ss}] Sleep command sent successfully");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[{now:HH:mm:ss}] Failed to send sleep command");
+                    }
+                }
+                else if (appSettings.Mode == "Shutdown")
+                {
+                    Console.WriteLine($"[{now:HH:mm:ss}] Forcing system shutdown...");
+                    try
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "shutdown.exe",
+                            Arguments = "/s /t 0",
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        });
+                        Console.WriteLine($"[{now:HH:mm:ss}] Shutdown command sent successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[{now:HH:mm:ss}] Failed to send shutdown command: {ex.Message}");
+                    }
+                }
+                
+                // Reset activity timer to prevent immediate re-triggering
+                lastActivityTime = currentTime;
+            }
         }
     }
 
@@ -282,7 +335,7 @@ static class Program
                 Console.WriteLine("Single instance check passed");
 
                 // Load settings at startup
-                var settings = SettingsManager.LoadSettings();
+                appSettings = SettingsManager.LoadSettings();
                 Console.WriteLine("Settings loaded successfully");
 
                 // To customize application configuration such as set high DPI settings or default font,
@@ -293,6 +346,7 @@ static class Program
                 // Initialize activity monitoring
                 Console.WriteLine("Initializing activity monitoring...");
                 lastInputTime = GetLastInputTime();
+                lastActivityTime = GetTickCount();
                 
                 // Initialize controller packet numbers
                 for (uint i = 0; i < 4; i++)
@@ -307,13 +361,15 @@ static class Program
                 
                 // Start activity monitoring timer
                 activityTimer = new System.Windows.Forms.Timer();
-                activityTimer.Interval = 5000; // 5 seconds
+                activityTimer.Interval = appSettings.CheckIntervalSeconds * 1000; // Convert to milliseconds
                 activityTimer.Tick += CheckActivity;
                 activityTimer.Start();
-                Console.WriteLine("Activity monitoring timer started - checking every 5 seconds");
+                Console.WriteLine($"Activity monitoring timer started - checking every {appSettings.CheckIntervalSeconds} seconds");
+                Console.WriteLine($"Timeout: {appSettings.TimeoutMinutes} minutes, Mode: {appSettings.Mode}");
                 
                 Console.WriteLine("Starting main application loop with Form1...");
-                Application.Run(new Form1());
+                mainForm = new Form1(appSettings);
+                Application.Run(mainForm);
                 
                 Console.WriteLine("Application loop ended");
                 
