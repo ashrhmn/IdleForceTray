@@ -2,7 +2,7 @@
 
 ## Project Setup
 - [x] Create PRD.md, TODO.md, and .cursorrules files
-- [ ] Create WinForms project named IdleForceTray on .NET 8
+- [x] Create WinForms project named IdleForceTray on .NET 8
 
 ## Core Implementation
 - [ ] Add PInvoke for GetLastInputInfo, SetSuspendState, XInputGetState with three DLL names
