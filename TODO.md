@@ -8,7 +8,7 @@
 - [x] Add PInvoke for GetLastInputInfo, SetSuspendState, XInputGetState with three DLL names
 - [x] Implement named mutex for single instance
 - [x] Implement tray NotifyIcon with context menu and event handlers
-- [ ] Implement settings persistence with JSON
+- [x] Implement settings persistence with JSON
 - [ ] Implement startup toggle using ShellLink with Task Scheduler fallback
 - [ ] Implement logging with rolling files
 - [ ] Implement timer loop with try/catch protection

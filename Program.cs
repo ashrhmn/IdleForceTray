@@ -1,6 +1,103 @@
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace IdleForceTray;
+
+public class Settings
+{
+    public string Mode { get; set; } = "Sleep";
+    public int TimeoutMinutes { get; set; } = 20;
+    public int CheckIntervalSeconds { get; set; } = 5;
+    public bool GuaranteedSleep { get; set; } = false;
+    public bool StartWithWindows { get; set; } = true;
+    public string LogLevel { get; set; } = "Info";
+    public bool FirstRunCompleted { get; set; } = false;
+
+    public void ValidateAndCorrect()
+    {
+        if (Mode != "Sleep" && Mode != "Shutdown")
+            Mode = "Sleep";
+        
+        if (TimeoutMinutes < 1 || TimeoutMinutes > 1440) // 1 minute to 24 hours
+            TimeoutMinutes = 20;
+        
+        if (CheckIntervalSeconds < 1 || CheckIntervalSeconds > 60)
+            CheckIntervalSeconds = 5;
+        
+        if (LogLevel != "Error" && LogLevel != "Warn" && LogLevel != "Info" && LogLevel != "Debug")
+            LogLevel = "Info";
+    }
+}
+
+public static class SettingsManager
+{
+    private static readonly string SettingsDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), 
+        "IdleForce");
+    
+    private static readonly string SettingsFilePath = Path.Combine(SettingsDirectory, "settings.json");
+    
+    private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
+    public static Settings LoadSettings()
+    {
+        try
+        {
+            // Ensure directory exists
+            if (!Directory.Exists(SettingsDirectory))
+            {
+                Directory.CreateDirectory(SettingsDirectory);
+            }
+
+            // Load settings if file exists
+            if (File.Exists(SettingsFilePath))
+            {
+                string json = File.ReadAllText(SettingsFilePath);
+                var settings = JsonSerializer.Deserialize<Settings>(json, JsonOptions) ?? new Settings();
+                settings.ValidateAndCorrect();
+                
+                // Save corrected settings back if validation changed anything
+                SaveSettings(settings);
+                return settings;
+            }
+        }
+        catch (Exception)
+        {
+            // If loading fails, return defaults and save them
+        }
+
+        // Return defaults and save them
+        var defaultSettings = new Settings();
+        SaveSettings(defaultSettings);
+        return defaultSettings;
+    }
+
+    public static void SaveSettings(Settings settings)
+    {
+        try
+        {
+            // Ensure directory exists
+            if (!Directory.Exists(SettingsDirectory))
+            {
+                Directory.CreateDirectory(SettingsDirectory);
+            }
+
+            settings.ValidateAndCorrect();
+            string json = JsonSerializer.Serialize(settings, JsonOptions);
+            File.WriteAllText(SettingsFilePath, json);
+        }
+        catch (Exception)
+        {
+            // Silently fail - settings just won't persist
+        }
+    }
+}
 
 static class Program
 {
@@ -133,6 +230,9 @@ static class Program
                 // Another instance is already running, exit silently
                 return;
             }
+
+            // Load settings at startup
+            var settings = SettingsManager.LoadSettings();
 
             // To customize application configuration such as set high DPI settings or default font,
             // see https://aka.ms/applicationconfiguration.
