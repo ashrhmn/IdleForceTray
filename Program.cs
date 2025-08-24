@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Reflection;
 using System.Text;
+using System.Windows.Forms;
 using IdleForceTray.Tests;
 
 namespace IdleForceTray;
@@ -99,14 +100,11 @@ public static class Logger
                 
                 File.AppendAllText(LogFilePath, logEntry + Environment.NewLine);
                 
-                // Also output to console for debugging
-                Console.WriteLine(logEntry);
             }
         }
         catch (Exception)
         {
-            // Logging failed - write to console as fallback
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [LOG ERROR] Failed to write log: {message}");
+            // Logging failed - silently fail since we're running as a Windows app
         }
     }
     
@@ -142,7 +140,7 @@ public static class Logger
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [LOG ERROR] Failed to rotate log files: {ex.Message}");
+            // Log rotation failed - silently fail since we're running as a Windows app
         }
     }
 }
@@ -753,8 +751,7 @@ static class Program
                 default:
                     if (arg.StartsWith("-") || arg.StartsWith("/"))
                     {
-                        Console.WriteLine($"Unknown argument: {args[i]}");
-                        Console.WriteLine("Use --help for usage information.");
+                        MessageBox.Show($"Unknown argument: {args[i]}\nUse --help for usage information.", "IdleForce Tray", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         Environment.Exit(1);
                     }
                     break;
@@ -764,17 +761,16 @@ static class Program
     
     private static void ShowHelp()
     {
-        Console.WriteLine("IdleForce Tray - Auto Sleep/Shutdown Tool");
-        Console.WriteLine();
-        Console.WriteLine("Usage: IdleForceTray.exe [options]");
-        Console.WriteLine();
-        Console.WriteLine("Options:");
-        Console.WriteLine("  -v, --verbose    Enable verbose activity logging (logs every 5 seconds)");
-        Console.WriteLine("  -t, --test       Run elevation helper tests (for development/troubleshooting)");
-        Console.WriteLine("  -h, --help       Show this help message");
-        Console.WriteLine();
-        Console.WriteLine("The application runs in the system tray. Right-click the tray icon");
-        Console.WriteLine("to access settings and controls.");
+        string helpText = "IdleForce Tray - Auto Sleep/Shutdown Tool\n\n" +
+                         "Usage: IdleForceTray.exe [options]\n\n" +
+                         "Options:\n" +
+                         "  -v, --verbose    Enable verbose activity logging (logs every 5 seconds)\n" +
+                         "  -t, --test       Run elevation helper tests (for development/troubleshooting)\n" +
+                         "  -h, --help       Show this help message\n\n" +
+                         "The application runs in the system tray. Right-click the tray icon\n" +
+                         "to access settings and controls.";
+        
+        MessageBox.Show(helpText, "IdleForce Tray - Help", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private static void CheckActivity(object? sender, EventArgs e)
