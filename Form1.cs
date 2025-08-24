@@ -24,6 +24,15 @@ public partial class Form1 : Form
     {
         appSettings = settings;
         InitializeComponent();
+        
+        // Sync startup setting with actual system state
+        bool actualStartupEnabled = Program.IsStartupShortcutEnabled();
+        if (actualStartupEnabled != appSettings.StartWithWindows)
+        {
+            appSettings.StartWithWindows = actualStartupEnabled;
+            SettingsManager.SaveSettings(appSettings);
+        }
+        
         InitializeTrayIcon();
         
         // Hide the form immediately since this is a tray-only app
@@ -263,11 +272,22 @@ public partial class Form1 : Form
 
     private void Startup_Click(object sender, EventArgs e)
     {
-        appSettings.StartWithWindows = !appSettings.StartWithWindows;
-        SettingsManager.SaveSettings(appSettings);
-        // TODO: Implement startup shortcut creation/deletion
-        MessageBox.Show($"Start with Windows: {(appSettings.StartWithWindows ? "Enabled" : "Disabled")}", "IdleForce", 
-                       MessageBoxButtons.OK, MessageBoxIcon.Information);
+        bool newState = !appSettings.StartWithWindows;
+        
+        // Try to apply the startup setting
+        if (Program.SetStartupEnabled(newState))
+        {
+            appSettings.StartWithWindows = newState;
+            SettingsManager.SaveSettings(appSettings);
+            MessageBox.Show($"Start with Windows: {(newState ? "Enabled" : "Disabled")}", "IdleForce", 
+                           MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        else
+        {
+            MessageBox.Show("Failed to update startup setting. Please check permissions and try again.", "IdleForce Error", 
+                           MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        
         UpdateMenuChecks();
     }
 

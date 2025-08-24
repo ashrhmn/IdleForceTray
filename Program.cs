@@ -1,6 +1,9 @@
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Reflection;
+using System.Text;
 
 namespace IdleForceTray;
 
@@ -220,6 +223,205 @@ static class Program
         catch (Exception)
         {
             return false;
+        }
+    }
+
+    #endregion
+
+    #region Startup Management
+    
+    // COM interfaces for creating shell links
+    [ComImport]
+    [Guid("00021401-0000-0000-C000-000000000046")]
+    internal class ShellLink
+    {
+    }
+
+    [ComImport]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [Guid("000214F9-0000-0000-C000-000000000046")]
+    internal interface IShellLink
+    {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cchMaxPath, out IntPtr pfd, int fFlags);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cchMaxName);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cchMaxPath);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cchMaxArgs);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cchIconPath, out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, int dwReserved);
+        void Resolve(IntPtr hwnd, int fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+    }
+
+    [ComImport]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [Guid("0000010c-0000-0000-C000-000000000046")]
+    internal interface IPersist
+    {
+        void GetClassID(out Guid pClassID);
+    }
+
+    [ComImport]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [Guid("0000010b-0000-0000-C000-000000000046")]
+    internal interface IPersistFile : IPersist
+    {
+        new void GetClassID(out Guid pClassID);
+        [PreserveSig]
+        int IsDirty();
+
+        [PreserveSig]
+        int Load([In, MarshalAs(UnmanagedType.LPWStr)]
+            string pszFileName, uint dwMode);
+
+        [PreserveSig]
+        int Save([In, MarshalAs(UnmanagedType.LPWStr)] string pszFileName,
+            [In, MarshalAs(UnmanagedType.Bool)] bool fRemember);
+
+        [PreserveSig]
+        int SaveCompleted([In, MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+
+        [PreserveSig]
+        int GetCurFile([In, MarshalAs(UnmanagedType.LPWStr)] string ppszFileName);
+    }
+
+    public static string GetStartupShortcutPath()
+    {
+        string startupFolder = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
+        return Path.Combine(startupFolder, "IdleForceTray.lnk");
+    }
+
+    public static bool CreateStartupShortcut()
+    {
+        try
+        {
+            string shortcutPath = GetStartupShortcutPath();
+            string exePath = Environment.ProcessPath ?? Assembly.GetExecutingAssembly().Location;
+            
+            // Create the shortcut using COM
+            IShellLink link = (IShellLink)new ShellLink();
+            link.SetDescription("IdleForce Tray - Auto Sleep/Shutdown Tool");
+            link.SetPath(exePath);
+            link.SetWorkingDirectory(Path.GetDirectoryName(exePath));
+            
+            IPersistFile file = (IPersistFile)link;
+            file.Save(shortcutPath, false);
+            
+            return File.Exists(shortcutPath);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    public static bool DeleteStartupShortcut()
+    {
+        try
+        {
+            string shortcutPath = GetStartupShortcutPath();
+            if (File.Exists(shortcutPath))
+            {
+                File.Delete(shortcutPath);
+            }
+            return !File.Exists(shortcutPath);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    public static bool IsStartupShortcutEnabled()
+    {
+        return File.Exists(GetStartupShortcutPath());
+    }
+
+    // Task Scheduler fallback methods
+    public static bool CreateStartupTask()
+    {
+        try
+        {
+            string exePath = Environment.ProcessPath ?? Assembly.GetExecutingAssembly().Location;
+            string taskName = "IdleForceTray";
+            
+            // Create a scheduled task using schtasks command
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/create /tn \"{taskName}\" /tr \"{exePath}\" /sc onlogon /ru \"{Environment.UserName}\" /f",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+
+            using (var process = System.Diagnostics.Process.Start(startInfo))
+            {
+                process?.WaitForExit(5000); // Wait up to 5 seconds
+                return process?.ExitCode == 0;
+            }
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    public static bool DeleteStartupTask()
+    {
+        try
+        {
+            string taskName = "IdleForceTray";
+            
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/delete /tn \"{taskName}\" /f",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+
+            using (var process = System.Diagnostics.Process.Start(startInfo))
+            {
+                process?.WaitForExit(5000); // Wait up to 5 seconds
+                return true; // Don't check exit code since task might not exist
+            }
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    public static bool SetStartupEnabled(bool enabled)
+    {
+        if (enabled)
+        {
+            // Try shortcut first, fall back to Task Scheduler
+            if (CreateStartupShortcut())
+            {
+                return true;
+            }
+            return CreateStartupTask();
+        }
+        else
+        {
+            // Remove both shortcut and task if they exist
+            bool shortcutRemoved = DeleteStartupShortcut();
+            bool taskRemoved = DeleteStartupTask();
+            return shortcutRemoved || taskRemoved;
         }
     }
 
