@@ -41,11 +41,34 @@ public partial class Form1 : Form
         this.Visible = false;
     }
 
+    private Icon LoadEmbeddedIcon()
+    {
+        try
+        {
+            using (var stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("IdleForceTray.favicon.png"))
+            {
+                if (stream != null)
+                {
+                    using (var bitmap = new Bitmap(stream))
+                    {
+                        return Icon.FromHandle(bitmap.GetHicon());
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Fallback to system icon if loading fails
+        }
+        
+        return SystemIcons.Application;
+    }
+
     private void InitializeTrayIcon()
     {
         // Create the NotifyIcon
         trayIcon = new NotifyIcon();
-        trayIcon.Icon = SystemIcons.Application; // TODO: Replace with custom icon
+        trayIcon.Icon = LoadEmbeddedIcon();
         trayIcon.Visible = true;
         UpdateTooltip();
 
