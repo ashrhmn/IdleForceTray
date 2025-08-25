@@ -138,7 +138,7 @@ public static class Logger
                 File.Move(LogFilePath, firstRotatedFile);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Log rotation failed - silently fail since we're running as a Windows app
         }
@@ -150,7 +150,6 @@ public class Settings
     public string Mode { get; set; } = "Sleep";
     public int TimeoutMinutes { get; set; } = 20;
     public int CheckIntervalSeconds { get; set; } = 5;
-    public bool GuaranteedSleep { get; set; } = false;
     public bool StartWithWindows { get; set; } = true;
     public string LogLevel { get; set; } = "Info";
     public bool FirstRunCompleted { get; set; } = false;
@@ -251,10 +250,11 @@ static class Program
     private static uint[] lastControllerPackets = new uint[4];
     private static uint lastActivityTime = 0;
     private static Settings? appSettings;
-    private static Form1? mainForm;
+    private static TrayForm? mainForm;
     private static bool verboseLogging = false;
     
     public static bool IsPaused => mainForm?.IsPaused ?? false;
+    public static uint GetLastActivityTime() => lastActivityTime;
 
     #region Windows API Declarations
 
@@ -336,6 +336,19 @@ static class Program
         }
     }
 
+    // Helper method to get current tick count safely
+    public static uint GetCurrentTickCount()
+    {
+        try
+        {
+            return GetTickCount();
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    }
+    
     // Helper method to get last input time safely
     public static uint GetLastInputTime()
     {
@@ -454,7 +467,7 @@ static class Program
             IShellLink link = (IShellLink)new ShellLink();
             link.SetDescription("IdleForce Tray - Auto Sleep/Shutdown Tool");
             link.SetPath(exePath);
-            link.SetWorkingDirectory(Path.GetDirectoryName(exePath));
+            link.SetWorkingDirectory(Path.GetDirectoryName(exePath) ?? "");
             
             IPersistFile file = (IPersistFile)link;
             file.Save(shortcutPath, false);
@@ -570,151 +583,6 @@ static class Program
 
     #endregion
 
-    #region Elevation and Power Management
-    
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
-    
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool GetTokenInformation(IntPtr TokenHandle, int TokenInformationClass, IntPtr TokenInformation, uint TokenInformationLength, out uint ReturnLength);
-    
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GetCurrentProcess();
-    
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr hObject);
-    
-    private const int TokenElevationType = 18;
-    private const int TokenElevationTypeDefault = 1;
-    private const int TokenElevationTypeFull = 2;
-    private const int TokenElevationTypeLimited = 3;
-    
-    public static bool IsRunningAsAdministrator()
-    {
-        try
-        {
-            IntPtr tokenHandle = IntPtr.Zero;
-            try
-            {
-                if (!OpenProcessToken(GetCurrentProcess(), 0x0008, out tokenHandle))
-                    return false;
-                
-                IntPtr elevationTypePtr = Marshal.AllocHGlobal(sizeof(int));
-                try
-                {
-                    uint returnLength;
-                    if (!GetTokenInformation(tokenHandle, TokenElevationType, elevationTypePtr, (uint)sizeof(int), out returnLength))
-                        return false;
-                    
-                    int elevationType = Marshal.ReadInt32(elevationTypePtr);
-                    return elevationType == TokenElevationTypeFull;
-                }
-                finally
-                {
-                    Marshal.FreeHGlobal(elevationTypePtr);
-                }
-            }
-            finally
-            {
-                if (tokenHandle != IntPtr.Zero)
-                    CloseHandle(tokenHandle);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Failed to check elevation status", ex);
-            return false;
-        }
-    }
-    
-    public static bool DisableHibernation()
-    {
-        try
-        {
-            Logger.Info("Attempting to disable hibernation using powercfg -h off");
-            
-            var startInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "powercfg.exe",
-                Arguments = "-h off",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                Verb = "runas" // Request elevation
-            };
-            
-            using (var process = System.Diagnostics.Process.Start(startInfo))
-            {
-                if (process != null)
-                {
-                    process.WaitForExit(10000); // Wait up to 10 seconds
-                    string output = process.StandardOutput.ReadToEnd();
-                    string error = process.StandardError.ReadToEnd();
-                    
-                    if (process.ExitCode == 0)
-                    {
-                        Logger.Info("Successfully disabled hibernation");
-                        return true;
-                    }
-                    else
-                    {
-                        Logger.Error($"powercfg -h off failed with exit code {process.ExitCode}. Output: {output}. Error: {error}");
-                        return false;
-                    }
-                }
-            }
-        }
-        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
-        {
-            // User cancelled elevation prompt
-            Logger.Info("User cancelled elevation prompt for hibernation disable");
-            return false;
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Failed to disable hibernation", ex);
-            return false;
-        }
-        
-        return false;
-    }
-    
-    public static bool IsHibernationEnabled()
-    {
-        try
-        {
-            var startInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "powercfg.exe",
-                Arguments = "/a",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-            
-            using (var process = System.Diagnostics.Process.Start(startInfo))
-            {
-                if (process != null)
-                {
-                    process.WaitForExit(5000);
-                    string output = process.StandardOutput.ReadToEnd();
-                    
-                    // Check if hibernate is available in the output
-                    return output.Contains("Hibernate", StringComparison.OrdinalIgnoreCase);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Failed to check hibernation status", ex);
-        }
-        
-        return false; // Assume disabled if we can't check
-    }
-    
-    #endregion
 
     private static void ParseCommandLineArgs(string[] args)
     {
@@ -881,7 +749,7 @@ static class Program
                     if (appSettings.Mode == "Sleep")
                     {
                         Logger.Info("Forcing system sleep");
-                        if (ForceSleep(hibernate: false, force: appSettings.GuaranteedSleep))
+                        if (ForceSleep(hibernate: false, force: true))
                         {
                             Logger.Info("Sleep command sent successfully");
                         }
@@ -996,10 +864,10 @@ static class Program
                 Logger.Info($"Activity monitoring timer started - checking every {appSettings.CheckIntervalSeconds} seconds");
                 Logger.Info($"Timeout: {appSettings.TimeoutMinutes} minutes, Mode: {appSettings.Mode}");
                 
-                Logger.Debug("Starting main application loop with Form1");
+                Logger.Debug("Starting main application loop with TrayForm");
                 try
                 {
-                    mainForm = new Form1(appSettings);
+                    mainForm = new TrayForm(appSettings);
                     Application.Run(mainForm);
                 }
                 catch (Exception ex)

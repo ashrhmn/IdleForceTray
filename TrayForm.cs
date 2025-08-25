@@ -1,18 +1,18 @@
 namespace IdleForceTray;
 
-public partial class Form1 : Form
+public partial class TrayForm : Form
 {
-    private NotifyIcon trayIcon;
-    private ContextMenuStrip contextMenu;
-    private ToolStripMenuItem statusLabel;
-    private ToolStripMenuItem modeSubmenu;
-    private ToolStripMenuItem timeoutSubmenu;
-    private ToolStripMenuItem pauseResumeItem;
-    private ToolStripMenuItem sleepNowItem;
-    private ToolStripMenuItem shutdownNowItem;
-    private ToolStripMenuItem guaranteedSleepItem;
-    private ToolStripMenuItem startupItem;
-    private ToolStripMenuItem exitItem;
+    private NotifyIcon trayIcon = null!;
+    private ContextMenuStrip contextMenu = null!;
+    private ToolStripMenuItem statusLabel = null!;
+    private ToolStripMenuItem modeSubmenu = null!;
+    private ToolStripMenuItem timeoutSubmenu = null!;
+    private ToolStripMenuItem pauseResumeItem = null!;
+    private ToolStripMenuItem sleepNowItem = null!;
+    private ToolStripMenuItem shutdownNowItem = null!;
+    private ToolStripMenuItem startupItem = null!;
+    private ToolStripMenuItem exitItem = null!;
+    private System.Windows.Forms.Timer updateTimer = null!;
 
     // Application state
     private bool isPaused = false;
@@ -20,7 +20,7 @@ public partial class Form1 : Form
     
     public bool IsPaused => isPaused;
 
-    public Form1(Settings settings)
+    public TrayForm(Settings settings)
     {
         appSettings = settings;
         InitializeComponent();
@@ -39,20 +39,23 @@ public partial class Form1 : Form
         this.WindowState = FormWindowState.Minimized;
         this.ShowInTaskbar = false;
         this.Visible = false;
+        
+        // Initialize update timer for live countdown
+        updateTimer = new System.Windows.Forms.Timer();
+        updateTimer.Interval = 1000; // Update every second
+        updateTimer.Tick += UpdateTimer_Tick;
+        updateTimer.Start();
     }
 
     private Icon LoadEmbeddedIcon()
     {
         try
         {
-            using (var stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("IdleForceTray.favicon.png"))
+            using (var stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("IdleForceTray.IdleForceTray_icons.IdleForceTray.ico"))
             {
                 if (stream != null)
                 {
-                    using (var bitmap = new Bitmap(stream))
-                    {
-                        return Icon.FromHandle(bitmap.GetHicon());
-                    }
+                    return new Icon(stream);
                 }
             }
         }
@@ -131,13 +134,6 @@ public partial class Form1 : Form
 
         contextMenu.Items.Add(new ToolStripSeparator());
 
-        // Guaranteed Sleep toggle
-        guaranteedSleepItem = new ToolStripMenuItem("Guaranteed Sleep", null, GuaranteedSleep_Click) 
-        { 
-            Checked = appSettings.GuaranteedSleep 
-        };
-        contextMenu.Items.Add(guaranteedSleepItem);
-
         // Start with Windows toggle
         startupItem = new ToolStripMenuItem("Start with Windows", null, Startup_Click) 
         { 
@@ -160,7 +156,48 @@ public partial class Form1 : Form
         }
         else
         {
-            statusLabel.Text = $"Status: Running, {appSettings.Mode} in {appSettings.TimeoutMinutes}m";
+            var timeLeft = GetTimeUntilAction();
+            statusLabel.Text = $"Status: {appSettings.Mode} in {FormatTime(timeLeft)}";
+        }
+    }
+    
+    private TimeSpan GetTimeUntilAction()
+    {
+        try
+        {
+            uint currentTime = Program.GetCurrentTickCount();
+            uint lastActivity = Program.GetLastActivityTime();
+            uint timeoutMs = (uint)(appSettings.TimeoutMinutes * 60 * 1000);
+            
+            if (lastActivity == 0)
+            {
+                return TimeSpan.FromMinutes(appSettings.TimeoutMinutes);
+            }
+            
+            uint idleTime = currentTime - lastActivity;
+            if (idleTime >= timeoutMs)
+            {
+                return TimeSpan.Zero;
+            }
+            
+            uint remainingMs = timeoutMs - idleTime;
+            return TimeSpan.FromMilliseconds(remainingMs);
+        }
+        catch
+        {
+            return TimeSpan.FromMinutes(appSettings.TimeoutMinutes);
+        }
+    }
+    
+    private string FormatTime(TimeSpan timeSpan)
+    {
+        if (timeSpan.TotalSeconds < 60)
+        {
+            return $"{(int)Math.Ceiling(timeSpan.TotalSeconds)}s";
+        }
+        else
+        {
+            return $"{(int)Math.Ceiling(timeSpan.TotalMinutes)}m";
         }
     }
 
@@ -181,34 +218,33 @@ public partial class Form1 : Form
         // Update mode checks
         foreach (ToolStripMenuItem item in modeSubmenu.DropDownItems)
         {
-            item.Checked = (string)item.Tag == appSettings.Mode;
+            item.Checked = item.Tag?.ToString() == appSettings.Mode;
         }
 
         // Update timeout checks
         foreach (ToolStripMenuItem item in timeoutSubmenu.DropDownItems)
         {
-            item.Checked = (int)item.Tag == appSettings.TimeoutMinutes;
+            item.Checked = item.Tag is int timeout && timeout == appSettings.TimeoutMinutes;
         }
 
         // Update other toggles
         pauseResumeItem.Text = isPaused ? "Resume" : "Pause";
-        guaranteedSleepItem.Checked = appSettings.GuaranteedSleep;
         startupItem.Checked = appSettings.StartWithWindows;
     }
 
     #region Event Handlers
 
-    private void TrayIcon_MouseDoubleClick(object sender, MouseEventArgs e)
+    private void TrayIcon_MouseDoubleClick(object? sender, MouseEventArgs e)
     {
         // Double-click to toggle pause/resume
         PauseResume_Click(sender, e);
     }
 
-    private void ModeItem_Click(object sender, EventArgs e)
+    private void ModeItem_Click(object? sender, EventArgs e)
     {
-        if (sender is ToolStripMenuItem item)
+        if (sender is ToolStripMenuItem item && item.Tag is string mode)
         {
-            appSettings.Mode = (string)item.Tag;
+            appSettings.Mode = mode;
             SettingsManager.SaveSettings(appSettings);
             UpdateStatusLabel();
             UpdateTooltip();
@@ -216,11 +252,11 @@ public partial class Form1 : Form
         }
     }
 
-    private void TimeoutItem_Click(object sender, EventArgs e)
+    private void TimeoutItem_Click(object? sender, EventArgs e)
     {
-        if (sender is ToolStripMenuItem item)
+        if (sender is ToolStripMenuItem item && item.Tag is int timeout)
         {
-            appSettings.TimeoutMinutes = (int)item.Tag;
+            appSettings.TimeoutMinutes = timeout;
             SettingsManager.SaveSettings(appSettings);
             UpdateStatusLabel();
             UpdateTooltip();
@@ -228,7 +264,7 @@ public partial class Form1 : Form
         }
     }
 
-    private void PauseResume_Click(object sender, EventArgs e)
+    private void PauseResume_Click(object? sender, EventArgs e)
     {
         isPaused = !isPaused;
         UpdateStatusLabel();
@@ -236,7 +272,7 @@ public partial class Form1 : Form
         UpdateMenuChecks();
     }
 
-    private void SleepNow_Click(object sender, EventArgs e)
+    private void SleepNow_Click(object? sender, EventArgs e)
     {
         if (MessageBox.Show("Sleep the system now?", "IdleForce", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
         {
@@ -244,7 +280,7 @@ public partial class Form1 : Form
         }
     }
 
-    private void ShutdownNow_Click(object sender, EventArgs e)
+    private void ShutdownNow_Click(object? sender, EventArgs e)
     {
         if (MessageBox.Show("Shutdown the system now?", "IdleForce", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
         {
@@ -265,59 +301,8 @@ public partial class Form1 : Form
         }
     }
 
-    private void GuaranteedSleep_Click(object sender, EventArgs e)
-    {
-        var newState = !appSettings.GuaranteedSleep;
-        
-        if (newState)
-        {
-            var result = MessageBox.Show("This turns off Hibernate to ensure Sleep. Continue?", "IdleForce - Guaranteed Sleep", 
-                                       MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (result == DialogResult.Yes)
-            {
-                // Check if hibernation is currently enabled
-                bool hibernationEnabled = Program.IsHibernationEnabled();
-                
-                if (hibernationEnabled)
-                {
-                    // Disable hibernation using elevation if needed
-                    bool success = Program.DisableHibernation();
-                    
-                    if (success)
-                    {
-                        appSettings.GuaranteedSleep = true;
-                        SettingsManager.SaveSettings(appSettings);
-                        MessageBox.Show("Guaranteed Sleep enabled. Hibernate has been disabled.", "IdleForce", 
-                                      MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    else
-                    {
-                        MessageBox.Show("Failed to disable hibernation. Guaranteed Sleep was not enabled.", "IdleForce Error", 
-                                      MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
-                }
-                else
-                {
-                    // Hibernation is already disabled
-                    appSettings.GuaranteedSleep = true;
-                    SettingsManager.SaveSettings(appSettings);
-                    MessageBox.Show("Guaranteed Sleep enabled. Hibernation was already disabled.", "IdleForce", 
-                                  MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-            }
-        }
-        else
-        {
-            appSettings.GuaranteedSleep = false;
-            SettingsManager.SaveSettings(appSettings);
-            MessageBox.Show("Guaranteed Sleep disabled. Note: Hibernation settings were not changed.", "IdleForce", 
-                          MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
-        
-        UpdateMenuChecks();
-    }
 
-    private void Startup_Click(object sender, EventArgs e)
+    private void Startup_Click(object? sender, EventArgs e)
     {
         bool newState = !appSettings.StartWithWindows;
         
@@ -338,9 +323,15 @@ public partial class Form1 : Form
         UpdateMenuChecks();
     }
 
-    private void Exit_Click(object sender, EventArgs e)
+    private void Exit_Click(object? sender, EventArgs e)
     {
         Application.Exit();
+    }
+
+    private void UpdateTimer_Tick(object? sender, EventArgs e)
+    {
+        UpdateStatusLabel();
+        UpdateTooltip();
     }
 
     #endregion
@@ -355,7 +346,9 @@ public partial class Form1 : Form
         }
         else
         {
-            // Clean up tray icon when actually exiting
+            // Clean up resources when actually exiting
+            updateTimer?.Stop();
+            updateTimer?.Dispose();
             trayIcon?.Dispose();
             base.OnFormClosing(e);
         }
