@@ -11,6 +11,7 @@ public partial class TrayForm : Form
     private ToolStripMenuItem sleepNowItem = null!;
     private ToolStripMenuItem shutdownNowItem = null!;
     private ToolStripMenuItem startupItem = null!;
+    private ToolStripMenuItem viewLogsItem = null!;
     private ToolStripMenuItem exitItem = null!;
     private System.Windows.Forms.Timer updateTimer = null!;
 
@@ -140,6 +141,12 @@ public partial class TrayForm : Form
             Checked = appSettings.StartWithWindows 
         };
         contextMenu.Items.Add(startupItem);
+
+        contextMenu.Items.Add(new ToolStripSeparator());
+
+        // View Logs
+        viewLogsItem = new ToolStripMenuItem("View Logs", null, ViewLogs_Click);
+        contextMenu.Items.Add(viewLogsItem);
 
         contextMenu.Items.Add(new ToolStripSeparator());
 
@@ -321,6 +328,49 @@ public partial class TrayForm : Form
         }
         
         UpdateMenuChecks();
+    }
+
+    private void ViewLogs_Click(object? sender, EventArgs e)
+    {
+        try
+        {
+            // Get the log file path from the Logger class
+            string logDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), 
+                "IdleForce", "logs");
+            string logFilePath = Path.Combine(logDirectory, "IdleForce.log");
+            
+            // Ensure the log directory and file exist
+            if (!Directory.Exists(logDirectory))
+            {
+                MessageBox.Show("Log directory not found. No logs have been created yet.", "IdleForce", 
+                               MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            
+            if (!File.Exists(logFilePath))
+            {
+                MessageBox.Show("Log file not found. No logs have been created yet.", "IdleForce", 
+                               MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            
+            // Launch PowerShell with Get-Content -Wait to tail the log file
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoExit -Command \"Get-Content -Path '{logFilePath}' -Wait -Tail 50\"",
+                UseShellExecute = true,
+                CreateNoWindow = false
+            };
+            
+            System.Diagnostics.Process.Start(startInfo);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to open log viewer: {ex.Message}", "IdleForce Error", 
+                           MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private void Exit_Click(object? sender, EventArgs e)
