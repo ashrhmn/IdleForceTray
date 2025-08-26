@@ -24,10 +24,9 @@ jobs:
       - name: Build and publish
         run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./publish
 
-      - name: Create release with asset
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create ${{ github.ref_name }} ./publish/IdleForceTray.exe \
-            --title "Release ${{ github.ref_name }}" \
-            --notes "Automated release of IdleForceTray ${{ github.ref_name }}"
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./publish/IdleForceTray.exe
+          name: Release ${{ github.ref_name }}
+          body: Automated release of IdleForceTray ${{ github.ref_name }}
