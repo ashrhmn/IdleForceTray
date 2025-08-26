@@ -24,24 +24,10 @@ jobs:
       - name: Build and publish
         run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./publish
 
-      - name: Create release
-        id: create_release
-        uses: actions/create-release@v1
+      - name: Create release with asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-
-      - name: Upload release asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./publish/IdleForceTray.exe
-          asset_name: IdleForceTray.exe
-          asset_content_type: application/octet-stream
-
+        run: |
+          gh release create ${{ github.ref_name }} ./publish/IdleForceTray.exe \
+            --title "Release ${{ github.ref_name }}" \
+            --notes "Automated release of IdleForceTray ${{ github.ref_name }}"
